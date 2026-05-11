@@ -8,6 +8,7 @@ from shiny.express import input, session, ui
 
 
 STS_REGION = "us-east-1"
+AWS_CREDENTIALS_TOKEN_TYPE_URN = "urn:ietf:params:aws:token-type:credentials"
 
 
 ui.page_opts(title="AWS OAuth Diagnostic", fillable=False)
@@ -129,7 +130,10 @@ with ui.card():
         if not token:
             return ui.div("No session token available.", class_="alert alert-warning")
         try:
-            creds = connect_client().oauth.get_credentials(token)
+            creds = connect_client().oauth.get_credentials(
+                user_session_token=token,
+                requested_token_type=AWS_CREDENTIALS_TOKEN_TYPE_URN,
+            )
         except Exception as e:
             return ui.div(
                 ui.tags.strong(f"ERROR ({type(e).__name__})"),
@@ -176,7 +180,10 @@ with ui.card():
         if not token:
             return ui.div("No session token available.", class_="alert alert-warning")
         try:
-            creds = connect_client().oauth.get_credentials(token)
+            creds = connect_client().oauth.get_credentials(
+                user_session_token=token,
+                requested_token_type=AWS_CREDENTIALS_TOKEN_TYPE_URN,
+            )
         except Exception as e:
             return ui.div(
                 ui.tags.strong(f"Credential exchange failed ({type(e).__name__})"),
