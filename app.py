@@ -1,3 +1,6 @@
+import base64
+import json
+
 import boto3
 from posit import connect
 from shiny import reactive, render
@@ -36,14 +39,27 @@ def associations():
 def _extract_aws_creds(creds: dict):
     """Pull AWS credentials out of the get_credentials() response.
 
-    Posit Connect may return them in snake_case (access_key_id) or PascalCase
-    (AccessKeyId) depending on SDK version, so try both.
+    For the AWS template, vivid-api returns:
+      {
+        "access_token": <base64(json({accessKeyId, secretAccessKey, sessionToken, expiration}))>,
+        "issued_token_type": "urn:ietf:params:aws:token-type:credentials",
+        "token_type": "bearer"
+      }
+    Decode and return (access_key, secret_key, session_token, expiration).
     """
-    access_key = creds.get("access_key_id") or creds.get("AccessKeyId")
-    secret_key = creds.get("secret_access_key") or creds.get("SecretAccessKey")
-    session_tok = creds.get("session_token") or creds.get("SessionToken")
-    expiration = creds.get("expiration") or creds.get("Expiration")
-    return access_key, secret_key, session_tok, expiration
+    encoded = creds.get("access_token")
+    if not encoded:
+        return None, None, None, None
+    try:
+        decoded = json.loads(base64.b64decode(encoded).decode("utf-8"))
+    except (ValueError, json.JSONDecodeError):
+        return None, None, None, None
+    return (
+        decoded.get("accessKeyId"),
+        decoded.get("secretAccessKey"),
+        decoded.get("sessionToken"),
+        decoded.get("expiration"),
+    )
 
 
 with ui.card():
@@ -97,8 +113,8 @@ with ui.card():
         "Calls `connect.Client().oauth.get_credentials(token)` to retrieve AWS "
         "temporary credentials from Posit Connect. Connect Cloud performs the IDP "
         "OAuth flow and the AWS STS `AssumeRoleWithWebIdentity` exchange internally; "
-        "what comes back are short-lived AWS credentials (access key, secret key, "
-        "session token) scoped to the role configured on the integration."
+        "the response's `access_token` is base64-encoded JSON containing the AWS "
+        "`accessKeyId`, `secretAccessKey`, `sessionToken`, and `expiration`."
     )
     ui.input_action_button("get_creds", "Get credentials", class_="btn-primary")
 
