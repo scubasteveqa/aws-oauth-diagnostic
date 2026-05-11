@@ -36,8 +36,8 @@ def associations():
         return e
 
 
-def _extract_aws_creds(creds: dict):
-    """Pull AWS credentials out of the get_credentials() response.
+def _decode_aws_creds(creds: dict):
+    """Decode the AWS template's get_credentials() response.
 
     For the AWS template, vivid-api returns:
       {
@@ -45,21 +45,24 @@ def _extract_aws_creds(creds: dict):
         "issued_token_type": "urn:ietf:params:aws:token-type:credentials",
         "token_type": "bearer"
       }
-    Decode and return (access_key, secret_key, session_token, expiration).
+    Returns (decoded_dict, error_str). On success, error_str is None.
     """
     encoded = creds.get("access_token")
     if not encoded:
-        return None, None, None, None
+        return None, "creds.access_token is empty/missing"
     try:
-        decoded = json.loads(base64.b64decode(encoded).decode("utf-8"))
-    except (ValueError, json.JSONDecodeError):
-        return None, None, None, None
-    return (
-        decoded.get("accessKeyId"),
-        decoded.get("secretAccessKey"),
-        decoded.get("sessionToken"),
-        decoded.get("expiration"),
-    )
+        raw_bytes = base64.b64decode(encoded)
+    except Exception as e:
+        return None, f"base64 decode failed: {type(e).__name__}: {e}"
+    try:
+        text = raw_bytes.decode("utf-8")
+    except Exception as e:
+        return None, f"utf-8 decode failed: {type(e).__name__}: {e} (first 60 bytes: {raw_bytes[:60]!r})"
+    try:
+        decoded = json.loads(text)
+    except Exception as e:
+        return None, f"JSON parse failed: {type(e).__name__}: {e} (decoded text first 200 chars: {text[:200]!r})"
+    return decoded, None
 
 
 with ui.card():
@@ -133,12 +136,24 @@ with ui.card():
                 ui.tags.pre(str(e)),
                 class_="alert alert-danger",
             )
-        access_key, _, _, expiration = _extract_aws_creds(creds)
+
+        raw_access_token = creds.get("access_token", "")
+        decoded, err = _decode_aws_creds(creds)
+        if err:
+            return ui.div(
+                ui.tags.strong("PARTIAL — credentials fetched but decoding failed"),
+                ui.tags.pre(f"keys: {list(creds.keys())}"),
+                ui.tags.pre(f"access_token (first 60 chars): {str(raw_access_token)[:60]!r}"),
+                ui.tags.pre(f"access_token length: {len(str(raw_access_token))}"),
+                ui.tags.pre(f"decode error: {err}"),
+                class_="alert alert-warning",
+            )
         return ui.div(
             ui.tags.strong("SUCCESS"),
             ui.tags.pre(f"keys: {list(creds.keys())}"),
-            ui.tags.pre(f"access_key_id (first 12 chars): {str(access_key)[:12]}..."),
-            ui.tags.pre(f"expiration: {expiration}"),
+            ui.tags.pre(f"decoded keys: {list(decoded.keys())}"),
+            ui.tags.pre(f"accessKeyId (first 12 chars): {str(decoded.get('accessKeyId'))[:12]}..."),
+            ui.tags.pre(f"expiration: {decoded.get('expiration')}"),
             class_="alert alert-success",
         )
 
@@ -168,12 +183,22 @@ with ui.card():
                 ui.tags.pre(str(e)),
                 class_="alert alert-danger",
             )
-        access_key, secret_key, session_tok, _ = _extract_aws_creds(creds)
+        decoded, err = _decode_aws_creds(creds)
+        if err:
+            return ui.div(
+                ui.tags.strong("ERROR — couldn't decode credentials response"),
+                ui.tags.pre(f"keys: {list(creds.keys())}"),
+                ui.tags.pre(f"decode error: {err}"),
+                class_="alert alert-danger",
+            )
+        access_key = decoded.get("accessKeyId")
+        secret_key = decoded.get("secretAccessKey")
+        session_tok = decoded.get("sessionToken")
         if not (access_key and secret_key and session_tok):
             return ui.div(
                 ui.tags.strong("ERROR"),
-                ui.tags.pre("Credentials response missing one of: access_key_id, secret_access_key, session_token"),
-                ui.tags.pre(f"keys: {list(creds.keys())}"),
+                ui.tags.pre("Decoded credentials missing one of: accessKeyId, secretAccessKey, sessionToken"),
+                ui.tags.pre(f"decoded keys: {list(decoded.keys())}"),
                 class_="alert alert-danger",
             )
         try:
